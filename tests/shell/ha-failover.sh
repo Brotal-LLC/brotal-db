@@ -4,13 +4,13 @@ compose='docker compose -f compose/ha.yml'
 : "${PGUSER:=app}"; : "${PGDATABASE:=app}"; export PGUSER PGDATABASE
 nodes='postgres1 postgres2 postgres3'
 password_file=.secrets/postgres_password
-[ -r "$password_file" ] && [ -s "$password_file" ] || { echo "missing $password_file" >&2; exit 1; }
-# Invoked by the trap below.
-# shellcheck disable=SC2329
-cleanup() {
-  if [ "${old_leader:-}" ]; then $compose start "$old_leader" >/dev/null 2>&1 || true; fi
-}
-trap cleanup EXIT INT TERM
+if [ ! -r "$password_file" ] || [ ! -s "$password_file" ]; then
+  echo "missing $password_file" >&2
+  exit 1
+fi
+# Expansion is intentionally deferred until a trap fires.
+# shellcheck disable=SC2016
+trap 'if [ -n "${old_leader:-}" ]; then $compose start "$old_leader" >/dev/null 2>&1 || true; fi' EXIT INT TERM
 psql_from() {
   client_node=$1
   shift
@@ -42,12 +42,19 @@ end=$(( $(date +%s) + 180 ))
 while [ "$(date +%s)" -lt "$end" ]; do
   replicas=0
   for node in $nodes; do
-    $compose exec -T "$node" curl -fsS http://localhost:8008/replica >/dev/null 2>&1 && replicas=$((replicas + 1)) || true
+    if $compose exec -T "$node" curl -fsS http://localhost:8008/replica >/dev/null 2>&1; then
+      replicas=$((replicas + 1))
+    fi
   done
-  [ "$replicas" -eq 2 ] && break
+  if [ "$replicas" -eq 2 ]; then
+    break
+  fi
   sleep 2
 done
-[ "${replicas:-0}" -eq 2 ] || { echo 'timed out waiting for two Patroni replicas' >&2; exit 1; }
+if [ "${replicas:-0}" -ne 2 ]; then
+  echo 'timed out waiting for two Patroni replicas' >&2
+  exit 1
+fi
 wait_for_writer_route "$old_leader"
 # PostgreSQL dollar quoting is literal, not shell expansion.
 # shellcheck disable=SC2016
@@ -57,15 +64,27 @@ new_leader=''
 end=$(( $(date +%s) + 90 ))
 while [ "$(date +%s)" -lt "$end" ]; do
   for node in $nodes; do
-    [ "$node" = "$old_leader" ] && continue
+    if [ "$node" = "$old_leader" ]; then
+      continue
+    fi
     if $compose exec -T "$node" curl -fsS http://localhost:8008/primary >/dev/null 2>&1; then new_leader="$node"; break 2; fi
   done
   sleep 2
 done
-[ -n "$new_leader" ] || { echo 'no different Patroni leader elected' >&2; exit 1; }
+if [ -z "$new_leader" ]; then
+  echo 'no different Patroni leader elected' >&2
+  exit 1
+fi
 leaders=0
-for node in $nodes; do $compose exec -T "$node" curl -fsS http://localhost:8008/primary >/dev/null 2>&1 && leaders=$((leaders + 1)) || true; done
-[ "$leaders" -eq 1 ] || { echo "expected one writable leader, got $leaders" >&2; exit 1; }
+for node in $nodes; do
+  if $compose exec -T "$node" curl -fsS http://localhost:8008/primary >/dev/null 2>&1; then
+    leaders=$((leaders + 1))
+  fi
+done
+if [ "$leaders" -ne 1 ]; then
+  echo "expected one writable leader, got $leaders" >&2
+  exit 1
+fi
 wait_for_writer_route "$new_leader"
 # shellcheck disable=SC2016
 psql_from "$new_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -c 'INSERT INTO ha_probe VALUES (2, $$after-failover$$);'

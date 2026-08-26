@@ -11,12 +11,15 @@ elif [ -n "${PGPASSFILE:-}" ] && [ -r "$PGPASSFILE" ] && [ -s "$PGPASSFILE" ] &&
 fi
 if [ "$valid_passfile" -eq 0 ]; then
   password_file="${POSTGRES_PASSWORD_FILE:-.secrets/postgres_password}"
-  [ -r "$password_file" ] && [ -s "$password_file" ] || { echo "missing password file: $password_file" >&2; exit 1; }
+  if [ ! -r "$password_file" ] || [ ! -s "$password_file" ]; then
+    echo "missing password file: $password_file" >&2
+    exit 1
+  fi
   PGPASSFILE=$(mktemp); chmod 600 "$PGPASSFILE"; cleanup=1
   printf '*:*:*:%s:%s\n' "$PGUSER" "$(cat "$password_file")" > "$PGPASSFILE"
   export PGPASSFILE
 fi
-trap '[ "$cleanup" -eq 1 ] && rm -f "$PGPASSFILE"' EXIT
+trap 'if [ "$cleanup" -eq 1 ]; then rm -f "$PGPASSFILE"; fi' EXIT
 if command -v psql >/dev/null 2>&1; then
   psql -v ON_ERROR_STOP=1 -f tests/sql/smoke.sql
   psql -v ON_ERROR_STOP=1 -c "SELECT extname, extversion FROM pg_extension ORDER BY 1;"

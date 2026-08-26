@@ -51,8 +51,10 @@ jobs:
       - name: Clean integration environments
         if: always()
         run: |
-          docker compose -f compose/ha.yml down -v
-          docker compose -f compose/standalone.yml down -v
+          if [ -f .env ]; then
+            docker compose -f compose/ha.yml down -v
+            docker compose -f compose/standalone.yml down -v
+          fi
   build:
     needs: verify
     name: Build ${{ matrix.arch }} images
