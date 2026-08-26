@@ -1,0 +1,7 @@
+.git
+.github
+.secrets
+.env
+postgres-data
+etcd-data
+*.log

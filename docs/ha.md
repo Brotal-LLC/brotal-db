@@ -1,0 +1,3 @@
+# HA reference
+
+The stack uses Patroni + etcd3 consensus, three PostgreSQL nodes, HAProxy role checks, and PgBouncer session pooling. Verify status with `docker compose -f compose/ha.yml exec postgres1 patronictl -c /etc/patroni/patroni.yml list`. Switchover uses `patronictl switchover`; forced failover should be tested only with an explicit incident procedure. Rejoin requires a healthy etcd quorum and `pg_rewind`-compatible WAL. This demo has one host and is not production HA. `tests/shell/ha-failover.sh` performs a bounded leader-stop, promotion, PgBouncer write/read, and old-leader rejoin check, including a direct replicated-data assertion on the rejoined replica. This drill and the full extension smoke suite through PgBouncer/HAProxy have passed locally on amd64.

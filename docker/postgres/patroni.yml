@@ -1,0 +1,43 @@
+scope: brotal
+name: ${PATRONI_NAME}
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: ${PATRONI_NAME}:8008
+etcd3:
+  hosts: ${ETCD_HOSTS}
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    synchronous_mode: false
+    maximum_lag_on_failover: 1048576
+    failsafe_mode: true
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: replica
+        hot_standby: 'on'
+        wal_log_hints: 'on'
+        max_wal_senders: 10
+        max_replication_slots: 10
+        shared_preload_libraries: timescaledb,pg_textsearch,pg_stat_statements
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: ${PATRONI_NAME}:5432
+  data_dir: /var/lib/postgresql/data
+  pgpass: /tmp/pgpass
+  authentication:
+    superuser:
+      username: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+    replication:
+      username: ${REPLICATION_USER}
+      password: ${REPLICATION_PASSWORD}
+  callbacks:
+    on_start: /bin/true
+    post_bootstrap: /usr/local/bin/post_bootstrap.sh

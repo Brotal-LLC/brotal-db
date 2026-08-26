@@ -1,0 +1,10 @@
+PostgreSQL: PostgreSQL License (https://www.postgresql.org/about/licence/)
+pgvector: PostgreSQL License (https://github.com/pgvector/pgvector)
+PostGIS: GPL-2.0-or-later (https://postgis.net/)
+TimescaleDB and pg_textsearch: Apache-2.0 (https://www.timescale.com/)
+Patroni: MIT (https://github.com/patroni/patroni)
+Psycopg: LGPL-3.0-only (https://www.psycopg.org/psycopg3/)
+etcd: Apache-2.0 (https://etcd.io/)
+PgBouncer: ISC (https://www.pgbouncer.org/)
+HAProxy: GPL-2.0 (https://www.haproxy.org/)
+Runtime images retain their upstream license metadata; review notices before redistribution.

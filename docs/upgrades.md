@@ -1,0 +1,3 @@
+# Upgrades
+
+Pin and review every version in `versions.env`; validation rejects drift in Docker/Bake mirrors and release builds inject these values explicitly. When Patroni or Psycopg changes, regenerate `docker/postgres/requirements.lock` with `pip-compile --generate-hashes --strip-extras`, review the full transitive diff, and verify both native architectures. Build and run smoke tests before replacement. PostgreSQL major upgrades require `pg_upgrade` or logical migration; extension upgrades must be tested against the target ABI. For HA, drain through PgBouncer, replace one replica at a time, validate Patroni health, then perform a controlled switchover. Backups and restore drills remain external integrations.

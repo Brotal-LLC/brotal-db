@@ -1,0 +1,22 @@
+services:
+  postgres:
+    build:
+      context: ..
+      dockerfile: docker/postgres/Dockerfile
+    env_file: ../.env
+    environment:
+      DB_MODE: standalone
+      PGDATA: /var/lib/postgresql/18/data
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes: [standalone-data:/var/lib/postgresql/18/data]
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  standalone-data:
+secrets:
+  postgres_password: {file: ../.secrets/postgres_password}

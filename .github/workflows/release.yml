@@ -1,0 +1,150 @@
+name: release
+on:
+  push:
+    tags: ['18.*-bundle']
+env:
+  REGISTRY: ghcr.io
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea2e2b70b960c5e0d8a # v4.2.2
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client python3-yaml shellcheck
+      - run: make config-lint
+      - name: Build release candidates locally
+        run: docker buildx bake --set '*.platform=linux/amd64' --load postgres pgbouncer
+      - name: Verify PostgreSQL runtime imports and linkage
+        run: |
+          set -a
+          . ./versions.env
+          set +a
+          docker run --rm --entrypoint sh -e POSTGRES_MAJOR -e TIMESCALEDB_VERSION brotal/postgres:candidate -ec '
+            patroni --version
+            python3 -c "import psycopg"
+            libdir="/usr/lib/postgresql/$POSTGRES_MAJOR/lib"
+            for f in "$libdir/vector.so" "$libdir/postgis-3.so" "$libdir/postgis_raster-3.so" "$libdir/postgis_topology-3.so" "$libdir/pg_textsearch.so" "$libdir/timescaledb-$TIMESCALEDB_VERSION.so"; do
+              test -f "$f"
+              if ldd "$f" | grep -q "not found"; then exit 1; fi
+            done
+          '
+      - name: Scan PostgreSQL candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: 'brotal/postgres:candidate', format: table, exit-code: '1', ignore-unfixed: true, severity: 'CRITICAL,HIGH'}
+      - name: Scan PgBouncer candidate
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with: {image-ref: 'brotal/pgbouncer:candidate', format: table, exit-code: '1', ignore-unfixed: true, severity: 'CRITICAL,HIGH'}
+      - name: Run standalone smoke test
+        run: |
+          ./scripts/generate-secrets.sh
+          docker compose --env-file .env -f compose/standalone.yml up -d --build
+          trap 'docker compose -f compose/standalone.yml down -v' EXIT
+          timeout 180 sh -c 'until docker compose -f compose/standalone.yml exec -T postgres pg_isready -U app -d app; do sleep 3; done'
+          PGHOST=127.0.0.1 PGPORT=5432 ./tests/shell/smoke.sh
+      - name: Run HA failover drill
+        run: |
+          docker compose --env-file .env -f compose/ha.yml up -d --build
+          trap 'docker compose -f compose/ha.yml down -v' EXIT
+          timeout 480 ./tests/shell/ha-failover.sh
+      - name: Clean integration environments
+        if: always()
+        run: |
+          docker compose -f compose/ha.yml down -v
+          docker compose -f compose/standalone.yml down -v
+  build:
+    needs: verify
+    name: Build ${{ matrix.arch }} images
+    runs-on: ${{ matrix.runner }}
+    permissions: {contents: read, packages: write}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {arch: amd64, platform: linux/amd64, runner: ubuntu-24.04}
+          # Requires GitHub's hosted ARM64 runner availability for this repository.
+          - {arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea2e2b70b960c5e0d8a # v4.2.2
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push platform digest artifacts
+        env:
+          ARCH: ${{ matrix.arch }}
+          PLATFORM: ${{ matrix.platform }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -a
+          . ./versions.env
+          set +a
+          repository="${GITHUB_REPOSITORY,,}"
+          db="$REGISTRY/$repository:$TAG-$ARCH"
+          pool="$REGISTRY/$repository-pgbouncer:$TAG-$ARCH"
+          docker buildx build --platform "$PLATFORM" --tag "$db" --push --provenance=true --sbom=true \
+            --label "org.opencontainers.image.source=https://github.com/$repository" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$TAG" \
+            --build-arg POSTGRES_IMAGE="$POSTGRES_IMAGE" \
+            --build-arg PGVECTOR_VERSION="$PGVECTOR_VERSION" --build-arg PGVECTOR_SHA256="$PGVECTOR_SHA256" \
+            --build-arg POSTGIS_VERSION="$POSTGIS_VERSION" --build-arg POSTGIS_SHA256="$POSTGIS_SHA256" \
+            --build-arg PG_TEXTSEARCH_VERSION="$PG_TEXTSEARCH_VERSION" --build-arg PG_TEXTSEARCH_SHA256="$PG_TEXTSEARCH_SHA256" \
+            --build-arg TIMESCALEDB_VERSION="$TIMESCALEDB_VERSION" --build-arg TIMESCALEDB_SHA256="$TIMESCALEDB_SHA256" \
+            --build-arg PATRONI_VERSION="$PATRONI_VERSION" --build-arg PSYCOPG_VERSION="$PSYCOPG_VERSION" \
+            -f docker/postgres/Dockerfile .
+          docker buildx build --platform "$PLATFORM" --tag "$pool" --push --provenance=true --sbom=true \
+            --label "org.opencontainers.image.source=https://github.com/$repository" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$TAG" \
+            --build-arg DEBIAN_BOOKWORM_IMAGE="$DEBIAN_BOOKWORM_IMAGE" --build-arg DEBIAN_BOOKWORM_SLIM_IMAGE="$DEBIAN_BOOKWORM_SLIM_IMAGE" \
+            --build-arg PGBOUNCER_VERSION="$PGBOUNCER_VERSION" --build-arg PGBOUNCER_SHA256="$PGBOUNCER_SHA256" \
+            -f docker/pgbouncer/Dockerfile .
+          db_digest="$(docker buildx imagetools inspect "$db" --format '{{.Manifest.Digest}}')"
+          pool_digest="$(docker buildx imagetools inspect "$pool" --format '{{.Manifest.Digest}}')"
+          test -n "$db_digest" -a -n "$pool_digest"
+          printf '%s@%s\n' "$db" "$db_digest" > "db-$ARCH.ref"
+          printf '%s@%s\n' "$pool" "$pool_digest" > "pool-$ARCH.ref"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: '*-${{ matrix.arch }}.ref'
+          if-no-files-found: error
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions: {packages: write, id-token: write}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digests-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge platform manifests
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          db="$REGISTRY/$repository:$TAG"
+          pool="$REGISTRY/$repository-pgbouncer:$TAG"
+          docker buildx imagetools create -t "$db" "$(cat db-amd64.ref)" "$(cat db-arm64.ref)"
+          docker buildx imagetools create -t "$pool" "$(cat pool-amd64.ref)" "$(cat pool-arm64.ref)"
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
+      - name: Sign both manifest digests keylessly
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          for image in "$REGISTRY/$repository:$TAG" "$REGISTRY/$repository-pgbouncer:$TAG"; do
+            digest="$(docker buildx imagetools inspect "$image" --format '{{.Manifest.Digest}}')"
+            test -n "$digest"
+            cosign sign --yes "$image@$digest"
+          done

@@ -1,0 +1,40 @@
+\set ON_ERROR_STOP on
+DO $$ BEGIN IF current_setting('server_version_num') NOT LIKE '18%' THEN RAISE EXCEPTION 'PostgreSQL 18 required'; END IF; END $$;
+CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS postgis;
+CREATE EXTENSION IF NOT EXISTS postgis_raster;
+CREATE EXTENSION IF NOT EXISTS postgis_topology;
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS pg_textsearch;
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+DO $$ BEGIN
+  IF (SELECT count(*) FROM pg_extension WHERE extname IN ('vector','postgis','postgis_raster','postgis_topology','pg_trgm','pg_textsearch','timescaledb','pg_stat_statements')) <> 8 THEN RAISE EXCEPTION 'extensions missing'; END IF;
+  IF ST_AsText(ST_GeomFromText('POINT(1 2)',4326)) <> 'POINT(1 2)' THEN RAISE EXCEPTION 'postgis geometry failed'; END IF;
+  IF ST_Width(ST_MakeEmptyRaster(10,10,0,0,1,-1,0,0,0)) <> 10 THEN RAISE EXCEPTION 'postgis raster failed'; END IF;
+  IF current_setting('shared_preload_libraries') NOT LIKE '%timescaledb%' OR current_setting('shared_preload_libraries') NOT LIKE '%pg_textsearch%' OR current_setting('shared_preload_libraries') NOT LIKE '%pg_stat_statements%' THEN RAISE EXCEPTION 'preload missing'; END IF;
+  IF current_setting('timescaledb.license', true) <> 'apache' THEN RAISE EXCEPTION 'Timescale Apache license not active'; END IF;
+END $$;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'smoke_topology') THEN PERFORM topology.CreateTopology('smoke_topology'); END IF;
+  PERFORM topology.DropTopology('smoke_topology');
+END $$;
+DROP TABLE IF EXISTS vector_smoke;
+CREATE TABLE vector_smoke (id int primary key, embedding vector(3));
+INSERT INTO vector_smoke VALUES (1,'[1,2,3]');
+CREATE INDEX vector_smoke_idx ON vector_smoke USING hnsw (embedding vector_l2_ops);
+DO $$ BEGIN IF (SELECT id FROM vector_smoke ORDER BY embedding <-> '[1,2,4]' LIMIT 1) <> 1 THEN RAISE EXCEPTION 'vector nearest query failed'; END IF; END $$;
+DROP TABLE IF EXISTS trgm_smoke;
+CREATE TABLE trgm_smoke (body text);
+INSERT INTO trgm_smoke VALUES ('postgres');
+CREATE INDEX trgm_smoke_idx ON trgm_smoke USING gin (body gin_trgm_ops);
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM trgm_smoke WHERE body % 'postgre') THEN RAISE EXCEPTION 'trigram query failed'; END IF; END $$;
+DROP TABLE IF EXISTS textsearch_smoke;
+CREATE TABLE textsearch_smoke (body text primary key);
+INSERT INTO textsearch_smoke VALUES ('postgres full text search');
+CREATE INDEX textsearch_smoke_idx ON textsearch_smoke USING bm25(body) WITH (text_config='english');
+DO $$ BEGIN IF NOT EXISTS (SELECT body FROM textsearch_smoke ORDER BY body <@> to_bm25query('postgres', 'textsearch_smoke_idx') LIMIT 1) THEN RAISE EXCEPTION 'BM25 query failed'; END IF; END $$;
+DROP TABLE IF EXISTS metrics;
+CREATE TABLE metrics(ts timestamptz NOT NULL, value int);
+SELECT create_hypertable('metrics','ts',if_not_exists=>TRUE);
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_name = 'metrics') THEN RAISE EXCEPTION 'hypertable failed'; END IF; END $$;

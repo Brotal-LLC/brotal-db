@@ -1,0 +1,98 @@
+# Single-host HA demonstration only; HA is not backup and shares one failure domain.
+services:
+  etcd1: &etcd
+    image: quay.io/coreos/etcd:v3.5.17@sha256:a055da833a7c013b836ed0822e8ec1f99b059658be255ad8d0fcd31b635ae3d6
+    command:
+      - etcd
+      - --name=etcd1
+      - --data-dir=/etcd-data
+      - --advertise-client-urls=http://etcd1:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd1:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+    volumes: [etcd1-data:/etcd-data]
+    networks: [dbnet]
+    healthcheck: {test: [CMD, etcdctl, endpoint, health], interval: 5s, timeout: 3s, retries: 20}
+  etcd2:
+    <<: *etcd
+    command:
+      - etcd
+      - --name=etcd2
+      - --data-dir=/etcd-data
+      - --advertise-client-urls=http://etcd2:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd2:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+    volumes: [etcd2-data:/etcd-data]
+  etcd3:
+    <<: *etcd
+    command:
+      - etcd
+      - --name=etcd3
+      - --data-dir=/etcd-data
+      - --advertise-client-urls=http://etcd3:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd3:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380
+      - --initial-cluster-state=new
+    volumes: [etcd3-data:/etcd-data]
+  postgres1: &postgres
+    build: {context: .., dockerfile: docker/postgres/Dockerfile}
+    env_file: ../.env
+    environment:
+      DB_MODE: patroni
+      PGDATA: /var/lib/postgresql/18/data
+      PATRONI_NAME: postgres1
+      ETCD_HOSTS: "etcd1:2379,etcd2:2379,etcd3:2379"
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
+    secrets: [postgres_password, replication_password]
+    depends_on: {etcd1: {condition: service_healthy}, etcd2: {condition: service_healthy}, etcd3: {condition: service_healthy}}
+    volumes: [pg1-data:/var/lib/postgresql]
+    networks: [dbnet]
+    healthcheck: {test: [CMD-SHELL, curl -fsS http://localhost:8008/health >/dev/null], interval: 5s, timeout: 3s, retries: 30}
+  postgres2:
+    <<: *postgres
+    environment:
+      DB_MODE: patroni
+      PGDATA: /var/lib/postgresql/18/data
+      PATRONI_NAME: postgres2
+      ETCD_HOSTS: "etcd1:2379,etcd2:2379,etcd3:2379"
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
+    volumes: [pg2-data:/var/lib/postgresql]
+  postgres3:
+    <<: *postgres
+    environment:
+      DB_MODE: patroni
+      PGDATA: /var/lib/postgresql/18/data
+      PATRONI_NAME: postgres3
+      ETCD_HOSTS: "etcd1:2379,etcd2:2379,etcd3:2379"
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      REPLICATION_PASSWORD_FILE: /run/secrets/replication_password
+    volumes: [pg3-data:/var/lib/postgresql]
+  haproxy:
+    image: haproxy:3.2.22-trixie@sha256:230fe9a293d086b047f47ff827e0a65eb5e12a2e24c04bb75aa0b29960aa8c3f
+    volumes: [../docker/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro]
+    depends_on: [postgres1, postgres2, postgres3]
+    networks: [dbnet]
+    healthcheck: {test: [CMD, haproxy, -c, -f, /usr/local/etc/haproxy/haproxy.cfg], interval: 5s, timeout: 3s, retries: 20}
+  pgbouncer:
+    build: {context: .., dockerfile: docker/pgbouncer/Dockerfile}
+    environment: {PGBOUNCER_POOL_MODE: session}
+    secrets: [pgbouncer_users]
+    ports: ["127.0.0.1:6432:6432"]
+    depends_on: {haproxy: {condition: service_healthy}}
+    networks: [dbnet]
+    healthcheck: {test: [CMD-SHELL, nc -z localhost 6432], interval: 5s, timeout: 3s, retries: 20}
+networks: {dbnet: {}}
+volumes: {etcd1-data: {}, etcd2-data: {}, etcd3-data: {}, pg1-data: {}, pg2-data: {}, pg3-data: {}}
+secrets:
+  postgres_password: {file: ../.secrets/postgres_password}
+  replication_password: {file: ../.secrets/replication_password}
+  pgbouncer_users: {file: ../.secrets/pgbouncer_users}

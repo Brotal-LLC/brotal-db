@@ -1,0 +1,60 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea2e2b70b960c5e0d8a # v4.2.2
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client python3-yaml shellcheck
+      - run: make config-lint
+      - name: Build local images for scans
+        run: docker buildx bake --set '*.platform=linux/amd64' --load postgres pgbouncer
+      - name: Verify PostgreSQL runtime imports and linkage
+        run: |
+          set -a
+          . ./versions.env
+          set +a
+          docker run --rm --entrypoint sh -e POSTGRES_MAJOR -e TIMESCALEDB_VERSION brotal/postgres:candidate -ec '
+            patroni --version
+            python3 -c "import psycopg"
+            libdir="/usr/lib/postgresql/$POSTGRES_MAJOR/lib"
+            for f in "$libdir/vector.so" "$libdir/postgis-3.so" "$libdir/postgis_raster-3.so" "$libdir/postgis_topology-3.so" "$libdir/pg_textsearch.so" "$libdir/timescaledb-$TIMESCALEDB_VERSION.so"; do
+              test -f "$f"
+              if ldd "$f" | grep -q "not found"; then exit 1; fi
+            done
+          '
+      - name: Scan PostgreSQL image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: brotal/postgres:candidate
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Scan PgBouncer image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: brotal/pgbouncer:candidate
+          format: table
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Run standalone smoke test
+        run: |
+          ./scripts/generate-secrets.sh
+          docker compose --env-file .env -f compose/standalone.yml up -d --build
+          trap 'docker compose -f compose/standalone.yml down -v' EXIT
+          timeout 180 sh -c 'until docker compose -f compose/standalone.yml exec -T postgres pg_isready -U app -d app; do sleep 3; done'
+          PGHOST=127.0.0.1 PGPORT=5432 ./tests/shell/smoke.sh
+      - name: Run HA failover drill
+        run: |
+          docker compose --env-file .env -f compose/ha.yml up -d --build
+          trap 'docker compose -f compose/ha.yml down -v' EXIT
+          timeout 480 ./tests/shell/ha-failover.sh
+      - name: Clean integration environments
+        if: always()
+        run: |
+          docker compose -f compose/ha.yml down -v
+          docker compose -f compose/standalone.yml down -v
