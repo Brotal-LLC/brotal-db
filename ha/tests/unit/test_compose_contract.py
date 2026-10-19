@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "deploy"
@@ -81,7 +82,13 @@ def render_adoption(host: str) -> dict[str, Any]:
 
 
 def rendered_volume(service: dict[str, Any], target: str) -> dict[str, Any]:
-    return next(volume for volume in service["volumes"] if volume["target"] == target)
+    volume = next(volume for volume in service["volumes"] if volume["target"] == target)
+    if volume["type"] == "bind":
+        # Compose versions differ on serializing explicitly false bind options.
+        # A separate source contract requires the explicit false setting.
+        # Preserve an explicitly true value so the safety assertions still fail.
+        return {**volume, "bind": {"create_host_path": False, **volume.get("bind", {})}}
+    return volume
 
 
 def published_port(service: dict[str, Any], target: int) -> dict[str, Any]:
@@ -91,6 +98,18 @@ def published_port(service: dict[str, Any], target: int) -> dict[str, Any]:
 def test_complete_host_specific_compose_files_and_fixture_exist() -> None:
     assert FIXTURE_ENV.is_file(), "Compose rendering must use a committed non-secret fixture env"
     assert {host for host in ALL_HOSTS if compose_path(host).is_file()} == set(ALL_HOSTS)
+
+
+@pytest.mark.parametrize("path", sorted(DEPLOY.rglob("compose*.yaml")))
+def test_source_bind_mounts_explicitly_disable_host_path_creation(path: Path) -> None:
+    source = yaml.safe_load(path.read_text(encoding="utf-8"))
+    for service in source["services"].values():
+        for volume in service.get("volumes", []):
+            if isinstance(volume, dict) and volume.get("type") == "bind":
+                assert volume.get("bind", {}).get("create_host_path") is False, (
+                    path,
+                    volume["target"],
+                )
 
 
 @pytest.mark.parametrize("host", ALL_HOSTS)
