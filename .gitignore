@@ -3,3 +3,7 @@
 *.log
 postgres-data/
 etcd-data/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

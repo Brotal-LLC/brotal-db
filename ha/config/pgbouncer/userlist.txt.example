@@ -1,0 +1,7 @@
+# This tracked file is documentation only; do not mount it.
+# Runtime /run/secrets/pgbouncer_userlist contains only the pgbouncer_auth,
+# pgbouncer_admin, and pgbouncer_stats bootstrap roles. The auth_user entry must
+# use its secret-backend plaintext password so PgBouncer can log in to PostgreSQL
+# as a client and execute auth_query; the file is mode 0400 and never rendered.
+# Other login roles are resolved dynamically through pgbouncer.get_auth(text).
+"pgbouncer_auth" "<secret-backend-generated-password>"

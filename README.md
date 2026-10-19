@@ -27,3 +27,20 @@ Verified locally on amd64: both final images build and load; standalone initiali
 ## Operations
 
 Standalone delegates initialization/startup to the official entrypoint. Patroni exclusively owns init/start and runs an idempotent leader-only post-bootstrap callback. Patroni uses async replication, bounded failover lag, `pg_rewind`, replication slots and failsafe mode. See `docs/standalone.md`, `docs/ha.md`, `docs/security.md`, and `docs/upgrades.md`.
+
+## Production HA fleet
+
+The canonical production infrastructure is in [`ha/`](ha/README.md), imported from
+the former standalone `postgres-ha` checkout, including its pending client-cutover
+changes. This directory owns the host-specific Compose sources, independent mTLS
+etcd quorum, session poolers, primary-aware proxies, encrypted recovery tooling,
+WAL/slot monitoring and rolling bundle-upgrade runbooks. The top-level `compose/`
+stacks remain disposable single-host examples.
+
+Run `make ha-check` for production lint, source contracts and Compose rendering.
+The Python dependencies are locked in `ha/uv.lock`; `uv` installs them locally.
+`make ha-integration` explicitly runs the isolated three-node integration labs.
+Production uses the fail-closed synchronous policy described in
+[`ha/runbooks/lagbenaki-bundle-rollout.md`](ha/runbooks/lagbenaki-bundle-rollout.md),
+rather than inheriting the demo's replication/failsafe defaults. Never apply a demo
+Compose stack against production data.

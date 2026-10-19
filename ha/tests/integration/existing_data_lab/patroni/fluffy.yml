@@ -1,0 +1,42 @@
+---
+scope: postgres-ha-existing-data-lab
+namespace: /service/
+name: fluffy
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: fluffy-net:8008
+etcd3:
+  host: etcd:2379
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: fluffy-net:5432
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/lib/postgresql/18/bin
+  pgpass: /var/lib/postgresql/.pgpass
+  use_pg_rewind: true
+  use_slots: true
+  remove_data_directory_on_rewind_failure: false
+  remove_data_directory_on_diverged_timelines: false
+  parameters:
+    max_connections: 100
+    shared_buffers: 128MB
+    wal_level: replica
+    max_wal_senders: 10
+    max_replication_slots: 10
+    wal_keep_size: 256MB
+    wal_log_hints: "on"
+    hot_standby: "on"
+    hot_standby_feedback: "on"
+    password_encryption: scram-sha-256
+  pg_hba:
+    - local all all trust
+    - host all all 127.0.0.1/32 trust
+    - host all all ::1/128 scram-sha-256
+    - host replication patroni_replication 127.0.0.1/32 scram-sha-256
+    - host replication patroni_replication 0.0.0.0/0 scram-sha-256
+    - host replication replicator 0.0.0.0/0 scram-sha-256
+    - host all all 0.0.0.0/0 scram-sha-256
+tags:
+  failover_priority: 10
+  sync_priority: 10
+  noloadbalance: false

@@ -1,0 +1,32 @@
+---
+scope: brotal-postgres
+namespace: /service/
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 5
+    maximum_lag_on_failover: 16777216
+    maximum_lag_on_syncnode: 16777216
+    check_timeline: true
+    synchronous_mode: false
+    synchronous_mode_strict: false
+    synchronous_node_count: 1
+    slots:
+      rogue:
+        type: physical
+      nest1:
+        type: physical
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: 1000
+        wal_level: replica
+        hot_standby: "on"
+        hot_standby_feedback: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_size: 4GB
+        wal_log_hints: "on"
+        password_encryption: scram-sha-256

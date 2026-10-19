@@ -1,0 +1,46 @@
+---
+# Layer over the host definition. Preserve the broken replica's old PGDATA.
+services:
+  pgbouncer:
+    mem_limit: 512m
+    mem_reservation: 64m
+    cpus: 1
+    cpu_shares: 512
+  postgres:
+    image: ${BROTAL_IMAGE:?pin the tested brotal-db image ID}
+    user: "999:999"
+    entrypoint: ["/usr/local/bin/patroni-existing-secrets"]
+    command: ["/etc/patroni/patroni.yml"]
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      PATRONI_EXECUTABLE: /usr/local/bin/patroni
+    mem_limit: 8g
+    shm_size: 1g
+    mem_reservation: 2g
+    cpus: 4
+    cpu_shares: 2048
+    volumes:
+      - type: bind
+        source: ${BUNDLE_PGDATA:?select verified PostgreSQL 18 data directory}
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: >-
+          ${CONFIG_ROOT:?required}/patroni/${NODE_NAME:?required}.yml
+        target: /etc/patroni/patroni.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CONFIG_ROOT:?CONFIG_ROOT is required}/patroni/entrypoint.sh
+        target: /usr/local/bin/patroni-existing-secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SECRETS_DIR:?SECRETS_DIR is required}
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false

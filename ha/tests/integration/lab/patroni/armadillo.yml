@@ -1,0 +1,59 @@
+---
+scope: postgres-ha-lab
+namespace: /service/
+name: armadillo
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: armadillo:8008
+etcd3:
+  host: etcd:2379
+bootstrap:
+  dcs:
+    ttl: 12
+    loop_wait: 3
+    retry_timeout: 3
+    maximum_lag_on_failover: 1048576
+    check_timeline: true
+    synchronous_mode: true
+    synchronous_mode_strict: false
+    synchronous_node_count: 1
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: replica
+        hot_standby: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_log_hints: "on"
+        password_encryption: scram-sha-256
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: armadillo:5432
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/lib/postgresql/18/bin
+  pgpass: /var/lib/postgresql/.pgpass
+  use_pg_rewind: true
+  use_slots: true
+  remove_data_directory_on_rewind_failure: false
+  remove_data_directory_on_diverged_timelines: false
+  parameters:
+    max_connections: 100
+    shared_buffers: 128MB
+    wal_level: replica
+    max_wal_senders: 10
+    max_replication_slots: 10
+    wal_log_hints: "on"
+    hot_standby: "on"
+    password_encryption: scram-sha-256
+  pg_hba:
+    - local all all trust
+    - host replication patroni_replication 0.0.0.0/0 scram-sha-256
+    - host all all 0.0.0.0/0 scram-sha-256
+tags:
+  failover_priority: 100
+  sync_priority: 100
+  noloadbalance: false

@@ -1,0 +1,36 @@
+---
+# pi1 is access-plane only; PostgreSQL state stays on database hosts.
+services:
+  haproxy:
+    image: >-
+      haproxy:3.2-alpine@sha256:79799e8b2977e60802774fa53d29e6b54e045402cdd8a8b9fe43923e7095a047
+    user: "99:99"
+    restart: unless-stopped
+    ports:
+      - target: 6432
+        published: "6432"
+        host_ip: ${PI1_TAILNET_ADDRESS:?PI1_TAILNET_ADDRESS is required}
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: ${CONFIG_ROOT:?CONFIG_ROOT is required}/haproxy/pi1.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      database:
+        aliases:
+          - postgres-ha
+    read_only: true
+    tmpfs:
+      - /var/run/haproxy:rw,uid=99,gid=99,mode=0750
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+networks:
+  database:
+    name: database
+    external: true

@@ -1,0 +1,68 @@
+---
+# yamllint disable rule:line-length
+name: postgres-dcs
+
+services:
+  etcd:
+    image: gcr.io/etcd-development/etcd:v3.7.1@sha256:a9983dd6d9283138ab926daa307c6c25623636703ecf5645d5df4d666ce9eba2
+    container_name: ${ETCD_MEMBER_NAME:?ETCD_MEMBER_NAME must be one of etcd-hm, etcd-of, or etcd-witness}
+    hostname: ${ETCD_MEMBER_NAME:?ETCD_MEMBER_NAME is required}
+    user: "1000:1000"
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - /usr/local/bin/etcd
+      - --name=${ETCD_MEMBER_NAME:?ETCD_MEMBER_NAME is required}
+      - --data-dir=/var/lib/etcd
+      - --initial-cluster-token=brotal-postgres-etcd-v1
+      - --initial-cluster-state=new
+      - --initial-cluster=etcd-hm=https://${ETCD_HM_PRIVATE_ADDRESS:?ETCD_HM_PRIVATE_ADDRESS is required}:2380,etcd-of=https://${ETCD_OF_PRIVATE_ADDRESS:?ETCD_OF_PRIVATE_ADDRESS is required}:2380,etcd-witness=https://${ETCD_WITNESS_PRIVATE_ADDRESS:?ETCD_WITNESS_PRIVATE_ADDRESS is required}:2380
+      - --listen-client-urls=https://${ETCD_ADVERTISE_ADDRESS:?ETCD_ADVERTISE_ADDRESS is required}:2379
+      - --advertise-client-urls=https://${ETCD_ADVERTISE_ADDRESS:?ETCD_ADVERTISE_ADDRESS must be this member's private address}:2379
+      - --listen-peer-urls=https://${ETCD_ADVERTISE_ADDRESS:?ETCD_ADVERTISE_ADDRESS is required}:2380
+      - --initial-advertise-peer-urls=https://${ETCD_ADVERTISE_ADDRESS:?ETCD_ADVERTISE_ADDRESS must be this member's private address}:2380
+      - --client-cert-auth=true
+      - --trusted-ca-file=/run/secrets/etcd/ca.crt
+      - --cert-file=/run/secrets/etcd/member.crt
+      - --key-file=/run/secrets/etcd/member.key
+      - --peer-client-cert-auth=true
+      - --peer-trusted-ca-file=/run/secrets/etcd/ca.crt
+      - --peer-cert-file=/run/secrets/etcd/member.crt
+      - --peer-key-file=/run/secrets/etcd/member.key
+      - --logger=zap
+      - --log-level=info
+
+    volumes:
+      - type: bind
+        source: ${ETCD_DATA_DIR:?ETCD_DATA_DIR must be a persistent host path}
+        target: /var/lib/etcd
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${ETCD_SECRETS_DIR:-/srv/stacks/postgres-dcs/secrets}
+        target: /run/secrets/etcd
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      # Equivalent to: etcdctl endpoint health with explicit mTLS flags.
+      test:
+        - CMD
+        - /usr/local/bin/etcdctl
+        - --endpoints=https://${ETCD_ADVERTISE_ADDRESS:?ETCD_ADVERTISE_ADDRESS is required}:2379
+        - --cacert=/run/secrets/etcd/ca.crt
+        - --cert=/run/secrets/etcd/member.crt
+        - --key=/run/secrets/etcd/member.key
+        - endpoint
+        - health
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=1000,gid=1000,mode=0700

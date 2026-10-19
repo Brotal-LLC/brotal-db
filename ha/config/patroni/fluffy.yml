@@ -1,0 +1,97 @@
+---
+scope: brotal-postgres
+namespace: /service/
+name: fluffy
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: 100.64.0.2:8008
+
+etcd3:
+  hosts:
+    - 100.64.0.2:2379
+    - 100.64.0.1:2379
+    - 100.64.0.3:2379
+  protocol: https
+  cacert: /run/secrets/etcd/ca.crt
+  cert: /run/secrets/etcd/tls.crt
+  key: /run/secrets/etcd/tls.key
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 5
+    maximum_lag_on_failover: 16777216
+    maximum_lag_on_syncnode: 16777216
+    check_timeline: true
+    synchronous_mode: false
+    synchronous_mode_strict: false
+    synchronous_node_count: 1
+    slots:
+      rogue:
+        type: physical
+      nest1:
+        type: physical
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: 1000
+        wal_level: replica
+        hot_standby: "on"
+        hot_standby_feedback: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_size: 1GB
+        wal_log_hints: "on"
+        password_encryption: scram-sha-256
+  initdb:
+    - encoding: UTF8
+    - data-checksums
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: 100.64.0.2:5432
+  data_dir: /var/lib/postgresql/data
+  bin_dir: /usr/lib/postgresql/18/bin
+  pgpass: /var/lib/postgresql/.pgpass
+  use_pg_rewind: true
+  use_slots: true
+  remove_data_directory_on_rewind_failure: false
+  remove_data_directory_on_diverged_timelines: false
+  parameters:
+    max_connections: 1000
+    shared_buffers: 128MB
+    effective_cache_size: 4GB
+    maintenance_work_mem: 64MB
+    work_mem: 16MB
+    wal_level: replica
+    max_wal_senders: 10
+    max_replication_slots: 10
+    wal_keep_size: 1GB
+    wal_log_hints: "on"
+    hot_standby: "on"
+    hot_standby_feedback: "on"
+    password_encryption: scram-sha-256
+  pg_hba:
+    - local all all peer
+    - host all all 127.0.0.1/32 scram-sha-256
+    - host all all ::1/128 scram-sha-256
+    - host replication patroni_replication 127.0.0.1/32 scram-sha-256
+    - host replication patroni_replication ::1/128 scram-sha-256
+    - host replication patroni_replication 10.49.0.0/16 scram-sha-256
+    - host replication patroni_replication 10.63.0.0/16 scram-sha-256
+    - host replication patroni_replication 100.64.0.0/10 scram-sha-256
+    - host replication patroni_replication 172.18.0.0/16 scram-sha-256
+    - host replication replicator 10.49.0.0/16 scram-sha-256
+    - host replication replicator 10.63.0.0/16 scram-sha-256
+    - host all all 10.49.0.0/16 scram-sha-256
+    - host all all 10.63.0.0/16 scram-sha-256
+    - host all all 100.64.0.0/10 scram-sha-256
+    - host all all 172.18.0.0/16 scram-sha-256
+
+tags:
+  failover_priority: 10
+  sync_priority: 10
+  noloadbalance: false

@@ -1,0 +1,32 @@
+[project]
+name = "postgres-ha"
+version = "0.1.0"
+description = "Version-controlled infrastructure for the Brotal PostgreSQL HA migration"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "pre-commit>=4.0,<5",
+  "pytest>=8.0,<9",
+  "ruff>=0.9,<1",
+  "testcontainers>=4.10,<5",
+  "yamllint>=1.35,<2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+pythonpath = ["."]
+markers = [
+  "integration: disposable Testcontainers/Compose integration test",
+  "heavy: opt-in local load, partition, churn, or soak test; never run in CI",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

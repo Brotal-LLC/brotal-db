@@ -5,3 +5,4 @@
 postgres-data
 etcd-data
 *.log
+ha

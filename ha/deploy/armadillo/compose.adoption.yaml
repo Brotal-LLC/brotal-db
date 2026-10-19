@@ -1,0 +1,27 @@
+---
+# One-time existing-data handoff only.
+# Remove this overlay after patronictl restart.
+services:
+  postgres:
+    image: ${PATRONI_IMAGE:?PATRONI_IMAGE is required}
+    user: "999:999"
+    entrypoint:
+      - /usr/local/bin/patroni-existing-data-entrypoint
+    environment:
+      PATRONI_EXISTING_DATA_EXPECT_ROLE: primary
+      PATRONI_EXISTING_DATA_CONFIG: /etc/patroni/patroni.yml
+    volumes:
+      - type: bind
+        source: >-
+          ${LEGACY_STACK_ROOT:?}/config/postgresql.conf
+        target: /etc/postgresql/postgresql.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: >-
+          ${LEGACY_STACK_ROOT:?LEGACY_STACK_ROOT is required}/config/pg_hba.conf
+        target: /etc/postgresql/pg_hba.conf
+        read_only: true
+        bind:
+          create_host_path: false

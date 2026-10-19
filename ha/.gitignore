@@ -1,0 +1,31 @@
+# Local environment and deployment secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.csr
+*.secret
+*.secrets.yaml
+*.secrets.yml
+secrets/
+
+# Rendered host-specific deployment material
+rendered/
+*.rendered.yaml
+*.rendered.yml
+
+# Python tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Editor and operating-system files
+.DS_Store
+.idea/
+.vscode/

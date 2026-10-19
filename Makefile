@@ -1,4 +1,4 @@
-.PHONY: secrets config-lint build standalone-up standalone-down ha-up ha-down smoke ha-test
+.PHONY: secrets config-lint build standalone-up standalone-down ha-up ha-down smoke ha-test ha-check ha-lab-build ha-integration
 include versions.env
 .EXPORT_ALL_VARIABLES:
 secrets:
@@ -19,3 +19,10 @@ smoke:
 	@./tests/shell/smoke.sh
 ha-test:
 	@./tests/shell/ha-failover.sh
+ha-check:
+	@./scripts/validate-production-ha.sh
+ha-lab-build:
+	docker build -t postgres-ha-patroni:test ha/images/patroni
+	docker build -t postgres-ha-pgbouncer:test ha/images/pgbouncer
+ha-integration: ha-lab-build
+	UV_LINK_MODE=copy uv run --locked --directory ha pytest tests/integration -v -s

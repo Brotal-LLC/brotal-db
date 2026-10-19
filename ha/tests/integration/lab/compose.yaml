@@ -1,0 +1,227 @@
+---
+name: postgres-ha-test-lab
+x-patroni: &patroni
+  image: postgres-ha-patroni:test
+  user: "999:999"
+  restart: "no"
+  tmpfs:
+    - /var/lib/postgresql/data:rw,uid=999,gid=999,mode=0700
+  volumes:
+    - type: bind
+      source: ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}
+      target: /run/secrets
+      read_only: true
+  healthcheck:
+    test:
+      - CMD
+      - /opt/patroni/bin/patronictl
+      - -c
+      - /config/patroni.yml
+      - list
+    interval: 2s
+    timeout: 3s
+    retries: 60
+
+x-pgbouncer: &pgbouncer
+  image: postgres-ha-pgbouncer:test
+  user: "6433:6433"
+  restart: "no"
+  read_only: true
+  tmpfs:
+    - /var/run/pgbouncer:rw,uid=6433,gid=6433,mode=0750
+  healthcheck:
+    test: [CMD-SHELL, "kill -0 1"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+
+services:
+  etcd:
+    image: >-
+      gcr.io/etcd-development/etcd:v3.7.1@sha256:a9983dd6d9283138ab926daa307c6c25623636703ecf5645d5df4d666ce9eba2
+    user: "1000:1000"
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /var/lib/etcd:rw,uid=1000,gid=1000,mode=0700
+    command:
+      - /usr/local/bin/etcd
+      - --name=lab
+      - --data-dir=/var/lib/etcd
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-peer-urls=http://127.0.0.1:2380
+      - --initial-advertise-peer-urls=http://127.0.0.1:2380
+      - --initial-cluster=lab=http://127.0.0.1:2380
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/etcdctl
+        - --endpoints=http://127.0.0.1:2379
+        - endpoint
+        - health
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  armadillo-net:
+    image: >-
+      alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    user: "1000:1000"
+    restart: "no"
+    read_only: true
+    hostname: armadillo
+    command: [sleep, infinity]
+
+  rogue-net:
+    image: >-
+      alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    user: "1000:1000"
+    restart: "no"
+    read_only: true
+    hostname: rogue
+    command: [sleep, infinity]
+
+  fluffy-net:
+    image: >-
+      alpine:3.22@sha256:14358309a308569c32bdc37e2e0e9694be33a9d99e68afb0f5ff33cc1f695dce
+    user: "1000:1000"
+    restart: "no"
+    read_only: true
+    hostname: fluffy
+    command: [sleep, infinity]
+
+  armadillo:
+    <<: *patroni
+    network_mode: service:armadillo-net
+    depends_on:
+      etcd:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ./patroni/armadillo.yml
+        target: /config/patroni.yml
+        read_only: true
+      - type: bind
+        source: ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}
+        target: /run/secrets
+        read_only: true
+      - type: bind
+        source: ../../../sql
+        target: /lab/sql
+        read_only: true
+      - type: bind
+        source: ./setup.sql
+        target: /lab/setup.sql
+        read_only: true
+    command: [/config/patroni.yml]
+
+  rogue:
+    <<: *patroni
+    network_mode: service:rogue-net
+    depends_on:
+      armadillo:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ./patroni/rogue.yml
+        target: /config/patroni.yml
+        read_only: true
+      - type: bind
+        source: ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}
+        target: /run/secrets
+        read_only: true
+      - type: bind
+        source: ../../../sql
+        target: /lab/sql
+        read_only: true
+    command: [/config/patroni.yml]
+
+  fluffy:
+    <<: *patroni
+    network_mode: service:fluffy-net
+    depends_on:
+      armadillo:
+        condition: service_healthy
+    volumes:
+      - type: bind
+        source: ./patroni/fluffy.yml
+        target: /config/patroni.yml
+        read_only: true
+      - type: bind
+        source: ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}
+        target: /run/secrets
+        read_only: true
+      - type: bind
+        source: ../../../sql
+        target: /lab/sql
+        read_only: true
+    command: [/config/patroni.yml]
+
+  armadillo-pgbouncer:
+    <<: *pgbouncer
+    network_mode: service:armadillo-net
+    depends_on:
+      armadillo:
+        condition: service_healthy
+    volumes:
+      - ./pgbouncer/armadillo.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ../../../config/pgbouncer/pgbouncer-hba.conf:/etc/pgbouncer/pgbouncer-hba.conf:ro
+      - ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}/pgbouncer_userlist:/run/secrets/pgbouncer_userlist:ro
+
+  rogue-pgbouncer:
+    <<: *pgbouncer
+    network_mode: service:rogue-net
+    depends_on:
+      rogue:
+        condition: service_healthy
+    volumes:
+      - ./pgbouncer/rogue.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ../../../config/pgbouncer/pgbouncer-hba.conf:/etc/pgbouncer/pgbouncer-hba.conf:ro
+      - ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}/pgbouncer_userlist:/run/secrets/pgbouncer_userlist:ro
+
+  fluffy-pgbouncer:
+    <<: *pgbouncer
+    network_mode: service:fluffy-net
+    depends_on:
+      fluffy:
+        condition: service_healthy
+    volumes:
+      - ./pgbouncer/fluffy.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ../../../config/pgbouncer/pgbouncer-hba.conf:/etc/pgbouncer/pgbouncer-hba.conf:ro
+      - ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}/pgbouncer_userlist:/run/secrets/pgbouncer_userlist:ro
+
+  haproxy:
+    image: haproxy:3.2-alpine
+    user: "99:99"
+    restart: "no"
+    read_only: true
+    depends_on:
+      armadillo-pgbouncer:
+        condition: service_healthy
+      rogue-pgbouncer:
+        condition: service_healthy
+      fluffy-pgbouncer:
+        condition: service_healthy
+    tmpfs:
+      - /var/run/haproxy:rw,uid=99,gid=99,mode=0750
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    healthcheck:
+      test: [CMD, haproxy, -c, -f, /usr/local/etc/haproxy/haproxy.cfg]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  client:
+    image: postgres:18
+    user: "1000:1000"
+    restart: "no"
+    entrypoint: [sleep, infinity]
+    environment:
+      PGPASSFILE: /run/secrets/pgpass
+    volumes:
+      - ${LAB_SECRETS_DIR:-/tmp/postgres-ha-lab-render-secrets}:/run/secrets:ro
+    depends_on:
+      haproxy:
+        condition: service_healthy

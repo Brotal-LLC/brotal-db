@@ -1,0 +1,53 @@
+---
+files: ^ha/
+default_language_version:
+  python: python3
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: detect-private-key
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        args: [--strict]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/hadolint/hadolint
+    rev: v2.12.0
+    hooks:
+      - id: hadolint-docker
+
+  - repo: local
+    hooks:
+      - id: repository-contract
+        name: repository contract tests
+        entry: pytest ha/tests/unit/test_repository_contract.py -v
+        language: python
+        additional_dependencies: ["pytest>=8,<9"]
+        pass_filenames: false
+        always_run: true
+      - id: rendered-compose-config
+        name: render Compose files
+        entry: ha/scripts/pre-commit.sh --compose-only
+        language: system
+        pass_filenames: false
+        files: (^|/)compose.*\.ya?ml$

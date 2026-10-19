@@ -1,0 +1,12 @@
+[Unit]
+Description=PostgreSQL replication and WAL retention health
+After=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/postgres-ha/health.env
+ExecStart=/usr/bin/python3 /usr/local/lib/postgres-ha/check-ha-health.py --patroni-url ${PATRONI_URL} --output /var/lib/postgres-ha/health.json
+UMask=0077
+MemoryMax=128M
+CPUQuota=25%
+TimeoutStartSec=30

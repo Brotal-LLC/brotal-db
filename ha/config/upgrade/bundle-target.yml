@@ -1,0 +1,14 @@
+---
+# Merge into the existing DCS configuration; never replace unrelated settings.
+member_slots_ttl: 1d
+failsafe_mode: false
+slots:
+  armadillo:
+    type: physical
+  rogue:
+    type: physical
+postgresql:
+  parameters:
+    shared_preload_libraries: pg_textsearch,pg_stat_statements
+    max_slot_wal_keep_size: 16GB
+    wal_keep_size: 4GB

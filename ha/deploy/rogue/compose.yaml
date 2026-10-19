@@ -1,0 +1,168 @@
+---
+# Rogue keeps its existing PostgreSQL data path and Redis volume
+# during adoption.
+services:
+  postgres:
+    image: ${PATRONI_IMAGE:?PATRONI_IMAGE is required}
+    container_name: postgres
+    user: "999:999"
+    restart: unless-stopped
+    environment:
+      PGDATA: /var/lib/postgresql/data
+    ports:
+      - target: 5432
+        published: "5432"
+        protocol: tcp
+      - target: 8008
+        published: "8008"
+        host_ip: 100.64.0.4
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: /data/containers/postgres/data
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${CONFIG_ROOT:?CONFIG_ROOT is required}/patroni/rogue.yml
+        target: /etc/patroni/patroni.yml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SECRETS_DIR:?SECRETS_DIR is required}
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      database: {}
+
+  mongo:
+    image: mongo
+    hostname: mongo
+    container_name: mongo
+    labels:
+      komodo.skip: "true"
+    user: "999:999"
+    restart: unless-stopped
+    environment:
+      GLIBC_TUNABLES:
+    ports:
+      - target: 27017
+        published: "27017"
+        protocol: tcp
+    volumes:
+      - type: volume
+        source: mongo-data
+        target: /data/db
+      - type: volume
+        source: mongo-config
+        target: /data/configdb
+
+  redis:
+    image: docker.io/redis:alpine
+    hostname: redis
+    container_name: redis
+    user: "999:999"
+    restart: unless-stopped
+    command:
+      - redis-server
+      - --replicaof
+      - 10.63.0.10
+      - "6379"
+      - --appendonly
+      - "yes"
+    ports:
+      - target: 6379
+        published: "6379"
+        protocol: tcp
+    volumes:
+      - type: volume
+        source: redis-data
+        target: /data
+
+  pgbouncer:
+    image: ${PGBOUNCER_IMAGE:?PGBOUNCER_IMAGE is required}
+    user: "6433:6433"
+    restart: unless-stopped
+    ports:
+      - target: 6433
+        published: "6433"
+        host_ip: 100.64.0.4
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: ${CONFIG_ROOT:?CONFIG_ROOT is required}/pgbouncer/pgbouncer.ini
+        target: /etc/pgbouncer/pgbouncer.ini
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: >-
+          ${CONFIG_ROOT:?CONFIG_ROOT is required}/pgbouncer/pgbouncer-hba.conf
+        target: /etc/pgbouncer/pgbouncer-hba.conf
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${SECRETS_DIR:?SECRETS_DIR is required}
+        target: /run/secrets
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      database: {}
+    read_only: true
+    tmpfs:
+      - /var/run/pgbouncer:rw,uid=6433,gid=6433,mode=0750
+    ulimits:
+      nofile:
+        soft: 4096
+        hard: 8192
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  haproxy:
+    image: >-
+      haproxy:3.2-alpine@sha256:79799e8b2977e60802774fa53d29e6b54e045402cdd8a8b9fe43923e7095a047
+    user: "99:99"
+    restart: unless-stopped
+    ports:
+      - target: 6432
+        published: "6432"
+        host_ip: 100.64.0.4
+        protocol: tcp
+    volumes:
+      - type: bind
+        source: ${CONFIG_ROOT:?CONFIG_ROOT is required}/haproxy/rogue.cfg
+        target: /usr/local/etc/haproxy/haproxy.cfg
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      database:
+        aliases:
+          - postgres-ha
+    read_only: true
+    tmpfs:
+      - /var/run/haproxy:rw,uid=99,gid=99,mode=0750
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  mongo-data:
+    name: mongo-data
+  mongo-config:
+    name: mongo-config
+  redis-data:
+    name: redis-data
+
+networks:
+  database:
+    name: database
+    external: true
