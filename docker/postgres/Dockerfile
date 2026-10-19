@@ -6,7 +6,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 WORKDIR /tmp/src
 RUN set -eux; for spec in "pgvector ${PGVECTOR_VERSION} ${PGVECTOR_SHA256} https://github.com/pgvector/pgvector/archive/refs/tags/v${PGVECTOR_VERSION}.tar.gz" "pg_textsearch ${PG_TEXTSEARCH_VERSION} ${PG_TEXTSEARCH_SHA256} https://codeload.github.com/timescale/pg_textsearch/tar.gz/${PG_TEXTSEARCH_REVISION}" "timescaledb ${TIMESCALEDB_VERSION} ${TIMESCALEDB_SHA256} https://github.com/timescale/timescaledb/archive/refs/tags/${TIMESCALEDB_VERSION}.tar.gz"; do set -- $spec; wget -q -O /tmp/$1.tar.gz $4; echo "$3  /tmp/$1.tar.gz" | sha256sum -c -; mkdir -p $1; tar -xzf /tmp/$1.tar.gz --strip-components=1 -C $1; done
 RUN wget -q -O /tmp/postgis.tar.gz https://download.osgeo.org/postgis/source/postgis-${POSTGIS_VERSION}.tar.gz && echo "${POSTGIS_SHA256}  /tmp/postgis.tar.gz" | sha256sum -c - && mkdir postgis && tar -xzf /tmp/postgis.tar.gz --strip-components=1 -C postgis
-RUN cd pgvector && make -j"$(nproc)" && make DESTDIR=/opt/install install
+# The image runs on heterogeneous hosts; pgvector otherwise defaults to -march=native.
+RUN cd pgvector && make OPTFLAGS="" -j"$(nproc)" && make OPTFLAGS="" DESTDIR=/opt/install install
 COPY patches/postgis-3.6.1-pg18-raster.patch /tmp/postgis-3.6.1-pg18-raster.patch
 RUN cd postgis && patch -p1 < /tmp/postgis-3.6.1-pg18-raster.patch && ./autogen.sh && ./configure --with-raster --with-topology --without-address-standardizer --without-sfcgal && make -j"$(nproc)" && make DESTDIR=/opt/install install
 RUN cd pg_textsearch && make -j"$(nproc)" && make DESTDIR=/opt/install install

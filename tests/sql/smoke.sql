@@ -24,6 +24,17 @@ CREATE TABLE vector_smoke (id int primary key, embedding vector(3));
 INSERT INTO vector_smoke VALUES (1,'[1,2,3]');
 CREATE INDEX vector_smoke_idx ON vector_smoke USING hnsw (embedding vector_l2_ops);
 DO $$ BEGIN IF (SELECT id FROM vector_smoke ORDER BY embedding <-> '[1,2,4]' LIMIT 1) <> 1 THEN RAISE EXCEPTION 'vector nearest query failed'; END IF; END $$;
+-- Real catalog dimensions exercise vectorized distance kernels on older CPUs.
+DROP TABLE IF EXISTS vector_wide_smoke;
+CREATE TABLE vector_wide_smoke (id int primary key, embedding vector(768));
+INSERT INTO vector_wide_smoke SELECT 1, array_agg(n::real ORDER BY n)::vector FROM generate_series(1,768) n;
+INSERT INTO vector_wide_smoke SELECT 2, array_agg(-n::real ORDER BY n)::vector FROM generate_series(1,768) n;
+CREATE INDEX vector_wide_cosine_idx ON vector_wide_smoke USING hnsw (embedding vector_cosine_ops);
+DO $$ DECLARE query vector; BEGIN
+  SELECT embedding INTO query FROM vector_wide_smoke WHERE id=1;
+  IF (SELECT id FROM vector_wide_smoke ORDER BY embedding <=> query LIMIT 1) <> 1 THEN RAISE EXCEPTION 'wide vector cosine query failed'; END IF;
+  IF (SELECT embedding <=> query FROM vector_wide_smoke WHERE id=2) < 1.99 THEN RAISE EXCEPTION 'wide vector cosine distance failed'; END IF;
+END $$;
 DROP TABLE IF EXISTS trgm_smoke;
 CREATE TABLE trgm_smoke (body text);
 INSERT INTO trgm_smoke VALUES ('postgres');
