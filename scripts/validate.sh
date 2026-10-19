@@ -70,7 +70,7 @@ assert 'exec setpriv --reuid pgbouncer --regid "$(id -g pgbouncer)" --init-group
 assert f'variable "POSTGRES_MAJOR" {{ default = "{versions["POSTGRES_MAJOR"]}" }}' in bake
 assert 'tags = ["brotal/postgres:${POSTGRES_MAJOR}-bundle", "brotal/postgres:candidate"]' in bake
 assert 'tags = ["brotal/pgbouncer:${PGBOUNCER_VERSION}", "brotal/pgbouncer:candidate"]' in bake
-postgres_keys = ('POSTGRES_IMAGE', 'PGVECTOR_VERSION', 'POSTGIS_VERSION', 'PG_TEXTSEARCH_VERSION', 'TIMESCALEDB_VERSION', 'PATRONI_VERSION', 'PSYCOPG_VERSION', 'PGVECTOR_SHA256', 'POSTGIS_SHA256', 'PG_TEXTSEARCH_SHA256', 'TIMESCALEDB_SHA256')
+postgres_keys = ('POSTGRES_IMAGE', 'PGVECTOR_VERSION', 'POSTGIS_VERSION', 'PG_TEXTSEARCH_VERSION', 'PG_TEXTSEARCH_REVISION', 'TIMESCALEDB_VERSION', 'PATRONI_VERSION', 'PSYCOPG_VERSION', 'PGVECTOR_SHA256', 'POSTGIS_SHA256', 'PG_TEXTSEARCH_SHA256', 'TIMESCALEDB_SHA256')
 pgbouncer_keys = ('DEBIAN_BOOKWORM_IMAGE', 'DEBIAN_BOOKWORM_SLIM_IMAGE', 'PGBOUNCER_VERSION', 'PGBOUNCER_SHA256')
 for key in postgres_keys + pgbouncer_keys:
     assert f'variable "{key}" {{ default = "{versions[key]}" }}' in bake, f'{key} drifted in docker-bake.hcl'

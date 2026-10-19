@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-compose='docker compose -f compose/ha.yml'
+compose="docker compose -f ${HA_COMPOSE_FILE:-compose/ha.yml}"
 : "${PGUSER:=app}"; : "${PGDATABASE:=app}"; export PGUSER PGDATABASE
 nodes='postgres1 postgres2 postgres3'
 password_file=.secrets/postgres_password
@@ -56,6 +56,24 @@ if [ "${replicas:-0}" -ne 2 ]; then
   exit 1
 fi
 wait_for_writer_route "$old_leader"
+# The production contract requires an acknowledged synchronous copy before loss.
+# The generic demo starts asynchronously; enable and verify its real DCS setting.
+$compose exec -T "$old_leader" curl -fsS -XPATCH -H 'Content-Type: application/json' \
+  -d '{"synchronous_mode":true,"synchronous_mode_strict":false,"synchronous_node_count":1}' \
+  http://localhost:8008/config >/dev/null
+end=$(( $(date +%s) + 90 ))
+while ! psql_from "$old_leader" -h 127.0.0.1 -U "$PGUSER" -d "$PGDATABASE" -Atq \
+  -c "SELECT count(*) FROM pg_stat_replication WHERE sync_state IN ('sync','quorum');" | grep -Eq '^[1-9][0-9]*$'; do
+  [ "$(date +%s)" -lt "$end" ] || { echo 'no synchronous standby' >&2; exit 1; }
+  sleep 2
+done
+# Patroni publishes promotion eligibility to DCS after PostgreSQL's sync setting.
+# Stopping between those steps correctly leaves no eligible promotion candidate.
+while ! $compose exec -T "$old_leader" python3 -c \
+  'import json,sys,urllib.request; d=json.load(urllib.request.urlopen("http://localhost:8008/cluster")); sys.exit(0 if any(n["role"] == "sync_standby" for n in d["members"]) else 1)'; do
+  [ "$(date +%s)" -lt "$end" ] || { echo 'standby not eligible in DCS' >&2; exit 1; }
+  sleep 2
+done
 # PostgreSQL dollar quoting is literal, not shell expansion.
 # shellcheck disable=SC2016
 psql_from "$old_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -c 'CREATE TABLE IF NOT EXISTS ha_probe(id integer primary key, value text); INSERT INTO ha_probe VALUES (1, $$before-failover$$) ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value;'
