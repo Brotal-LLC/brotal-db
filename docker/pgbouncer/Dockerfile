@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
 WORKDIR /tmp
 RUN wget -q -O pgbouncer.tar.gz https://www.pgbouncer.org/downloads/files/${PGBOUNCER_VERSION}/pgbouncer-${PGBOUNCER_VERSION}.tar.gz && echo "${PGBOUNCER_SHA256}  pgbouncer.tar.gz" | sha256sum -c - && tar -xzf pgbouncer.tar.gz && cd pgbouncer-${PGBOUNCER_VERSION} && ./configure --prefix=/usr && make -j"$(nproc)" && make DESTDIR=/out install
 FROM ${DEBIAN_BOOKWORM_SLIM_IMAGE}
-RUN apt-get update && apt-get install -y --no-install-recommends libevent-2.1-7 libpq5 libssl3 ca-certificates util-linux netcat-openbsd && rm -rf /var/lib/apt/lists/* && useradd --system --home-dir /var/lib/pgbouncer pgbouncer && mkdir -p /var/run/pgbouncer /etc/pgbouncer /run/pgbouncer && chown -R pgbouncer:pgbouncer /var/run/pgbouncer /etc/pgbouncer /run/pgbouncer
+RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends libevent-2.1-7 libpq5 libssl3 ca-certificates util-linux netcat-openbsd && rm -rf /var/lib/apt/lists/* && useradd --system --home-dir /var/lib/pgbouncer pgbouncer && mkdir -p /var/run/pgbouncer /etc/pgbouncer /run/pgbouncer && chown -R pgbouncer:pgbouncer /var/run/pgbouncer /etc/pgbouncer /run/pgbouncer
 COPY --from=build /out/usr/bin/pgbouncer /usr/sbin/pgbouncer
 COPY --chmod=0755 docker/pgbouncer/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY --chmod=0644 docker/pgbouncer/pgbouncer.ini /etc/pgbouncer/pgbouncer.ini

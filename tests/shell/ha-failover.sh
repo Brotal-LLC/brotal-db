@@ -74,9 +74,9 @@ while ! $compose exec -T "$old_leader" python3 -c \
   [ "$(date +%s)" -lt "$end" ] || { echo 'standby not eligible in DCS' >&2; exit 1; }
   sleep 2
 done
-# PostgreSQL dollar quoting is literal, not shell expansion.
-# shellcheck disable=SC2016
-psql_from "$old_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -c 'CREATE TABLE IF NOT EXISTS ha_probe(id integer primary key, value text); INSERT INTO ha_probe VALUES (1, $$before-failover$$) ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value;'
+# A unique marker prevents an older successful run from hiding a lost write.
+probe_marker="before-failover-$(date +%s)-$$"
+psql_from "$old_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -c "CREATE TABLE IF NOT EXISTS ha_probe(id integer primary key, value text); INSERT INTO ha_probe VALUES (1, '$probe_marker') ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value;"
 $compose stop "$old_leader" >/dev/null
 new_leader=''
 end=$(( $(date +%s) + 90 ))
@@ -104,8 +104,9 @@ if [ "$leaders" -ne 1 ]; then
   exit 1
 fi
 wait_for_writer_route "$new_leader"
+psql_from "$new_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -Atq -v ON_ERROR_STOP=1 -c 'SELECT value FROM ha_probe WHERE id=1;' | grep -Fxq "$probe_marker"
 # shellcheck disable=SC2016
-psql_from "$new_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -c 'INSERT INTO ha_probe VALUES (2, $$after-failover$$);'
+psql_from "$new_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -c 'INSERT INTO ha_probe VALUES (2, $$after-failover$$) ON CONFLICT (id) DO UPDATE SET value=EXCLUDED.value;'
 psql_from "$new_leader" -h pgbouncer -p 6432 -U "$PGUSER" -d "$PGDATABASE" -Atq -v ON_ERROR_STOP=1 -c "SELECT 1 FROM ha_probe WHERE id=2 AND value='after-failover';" | grep -qx 1
 $compose start "$old_leader" >/dev/null
 end=$(( $(date +%s) + 120 ))
